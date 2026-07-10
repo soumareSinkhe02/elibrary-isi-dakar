@@ -1,1 +1,18 @@
+# Fichiers générés par Code::Blocks
+*.depend
+*.layout
+obj/
+bin/
 
+# Exécutables compilés
+*.exe
+*.o
+*.out
+
+# Données générées à l'exécution du programme
+DATABASE/
+REPORTS/
+
+# Fichiers système
+.DS_Store
+Thumbs.db
