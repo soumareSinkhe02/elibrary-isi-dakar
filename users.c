@@ -1,177 +1,241 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 #include "users.h"
 #include "utils.h"
 
-#define MDP_PAR_DEFAUT "Library123"
+static int users_rechercherParLogin(const char *login, Utilisateur *u);
 
-int users_loginEstValide(const char *login) {
-    if (strlen(login) != 6) return 0;
-    for (int i = 0; i < 6; i++) {
-        if (!isupper((unsigned char)login[i])) return 0;
-    }
-    return 1;
+#define FICHIER_USERS "DATABASE/USERS.dat"
+
+static int charger_utilisateurs(Utilisateur tab[]) {
+    FILE *f = fopen(FICHIER_USERS, "rb");
+    if (!f) return 0;
+    int nb = 0;
+    while (fread(&tab[nb], sizeof(Utilisateur), 1, f) == 1) nb++;
+    fclose(f);
+    return nb;
 }
 
-int users_loginExiste(const char *login) {
-    Utilisateur tmp;
-    return users_rechercherParLogin(login, &tmp);
+static void sauvegarder_utilisateurs(Utilisateur tab[], int nb) {
+    FILE *f = fopen(FICHIER_USERS, "wb");
+    if (!f) return;
+    for (int i = 0; i < nb; i++) fwrite(&tab[i], sizeof(Utilisateur), 1, f);
+    fclose(f);
 }
 
 void users_initialiserSiVide(void) {
-    utils_creerDossiers();
     FILE *f = fopen(FICHIER_USERS, "rb");
-    int vide = 1;
     if (f) {
-        Utilisateur u;
-        if (fread(&u, sizeof(Utilisateur), 1, f) == 1) vide = 0;
         fclose(f);
+        return;
     }
-    if (vide) {
-        Utilisateur admin;
-        users_ajouter("Admin", "Systeme", "770000000", "ISI Dakar",
-                      "admin@elibrary.sn", "ADMINI", ROLE_ADMIN, &admin);
-        printf("[INFO] Compte admin cree automatiquement : login=ADMINI mot de passe=%s\n",
-               MDP_PAR_DEFAUT);
-    }
+
+    Utilisateur admin;
+    admin.id = 1;
+    strcpy(admin.nom, "Admin");
+    strcpy(admin.prenom, "Super");
+    strcpy(admin.telephone, "0000000000");
+    strcpy(admin.adresse, "ISI Dakar");
+    strcpy(admin.email, "admin@isi.sn");
+    strcpy(admin.login, "ADMIN");
+    utils_crypterMotDePasse("Library123", admin.motDePasse);
+    admin.role = ROLE_ADMIN;
+    admin.etat = ETAT_ACTIF;
+    admin.doitChangerMdp = 1;
+    utils_dateActuelle(admin.dateCreation);
+    strcpy(admin.dateDerniereConnexion, "");
+
+    f = fopen(FICHIER_USERS, "wb");
+    fwrite(&admin, sizeof(Utilisateur), 1, f);
+    fclose(f);
 }
 
-int users_ajouter(const char *nom, const char *prenom, const char *telephone,
+int users_connecter(Utilisateur *u) {
+    char login[7], mdp[51];
+    printf("Login (6 majuscules) : ");
+    fgets(login, sizeof(login), stdin);
+    login[strcspn(login, "\n")] = 0;
+    printf("Mot de passe : ");
+    fgets(mdp, sizeof(mdp), stdin);
+    mdp[strcspn(mdp, "\n")] = 0;
+
+    Utilisateur tab[1000];
+    int nb = charger_utilisateurs(tab);
+    for (int i = 0; i < nb; i++) {
+        if (strcmp(tab[i].login, login) == 0 &&
+            utils_verifierMotDePasse(mdp, tab[i].motDePasse) &&
+            tab[i].etat == ETAT_ACTIF) {
+            *u = tab[i];
+            utils_dateActuelle(u->dateDerniereConnexion);
+
+            tab[i].dateDerniereConnexion[0] = '\0';
+
+            strcpy(tab[i].dateDerniereConnexion, u->dateDerniereConnexion);
+            sauvegarder_utilisateurs(tab, nb);
+
+            strcpy(loginCourant, login);
+            return 1;
+        }
+    }
+    printf("Connexion echouee.\n");
+    return 0;
+}
+
+int users_ajouter(const char *nom, const char *prenom, const char *tel,
                    const char *adresse, const char *email, const char *login,
                    Role role, Utilisateur *resultat) {
-    if (!users_loginEstValide(login)) {
-        printf("Erreur : le login doit comporter exactement 6 lettres majuscules.\n");
+    Utilisateur existant;
+    if (users_rechercherParLogin(login, &existant)) {
+        printf("Login deja utilise.\n");
         return 0;
     }
-    if (users_loginExiste(login)) {
-        printf("Erreur : ce login existe deja.\n");
-        return 0;
-    }
-
-    Utilisateur u = {0};
+    Utilisateur u;
     u.id = utils_prochainId(FICHIER_USERS, sizeof(Utilisateur));
-    strncpy(u.nom, nom, NAME_LEN - 1);
-    strncpy(u.prenom, prenom, NAME_LEN - 1);
-    strncpy(u.telephone, telephone, PHONE_LEN - 1);
-    strncpy(u.adresse, adresse, ADDR_LEN - 1);
-    strncpy(u.email, email, EMAIL_LEN - 1);
-    strncpy(u.login, login, LOGIN_LEN - 1);
-    utils_crypterMotDePasse(MDP_PAR_DEFAUT, u.motDePasse);
+    strcpy(u.nom, nom);
+    strcpy(u.prenom, prenom);
+    strcpy(u.telephone, tel);
+    strcpy(u.adresse, adresse);
+    strcpy(u.email, email);
+    strcpy(u.login, login);
+    utils_crypterMotDePasse("Library123", u.motDePasse);
     u.role = role;
     u.etat = ETAT_ACTIF;
-    utils_dateActuelle(u.dateCreation);
-    strcpy(u.dateDerniereConnexion, "-");
     u.doitChangerMdp = 1;
+    utils_dateActuelle(u.dateCreation);
+    strcpy(u.dateDerniereConnexion, "");
 
     FILE *f = fopen(FICHIER_USERS, "ab");
-    if (!f) { printf("Erreur ouverture fichier utilisateurs.\n"); return 0; }
+    if (!f) return 0;
     fwrite(&u, sizeof(Utilisateur), 1, f);
     fclose(f);
-
-    utils_journaliser(login, "Creation de compte utilisateur");
     if (resultat) *resultat = u;
-    return 1;
-}
-
-int users_rechercherParId(int id, Utilisateur *resultat) {
-    FILE *f = fopen(FICHIER_USERS, "rb");
-    if (!f) return 0;
-    Utilisateur u;
-    while (fread(&u, sizeof(Utilisateur), 1, f) == 1) {
-        if (u.id == id) { *resultat = u; fclose(f); return 1; }
-    }
-    fclose(f);
-    return 0;
-}
-
-int users_rechercherParLogin(const char *login, Utilisateur *resultat) {
-    FILE *f = fopen(FICHIER_USERS, "rb");
-    if (!f) return 0;
-    Utilisateur u;
-    while (fread(&u, sizeof(Utilisateur), 1, f) == 1) {
-        if (strcmp(u.login, login) == 0) { *resultat = u; fclose(f); return 1; }
-    }
-    fclose(f);
-    return 0;
-}
-
-/* Réécrit tout le fichier avec l'utilisateur modifié (technique "lire tout,
-   remplacer, réécrire tout" : la plus simple à expliquer en soutenance) */
-static int users_sauvegarder(Utilisateur *u) {
-    FILE *f = fopen(FICHIER_USERS, "rb");
-    if (!f) return 0;
-    Utilisateur tmp;
-    Utilisateur *tous = malloc(sizeof(Utilisateur) * 10000);
-    int n = 0;
-    while (fread(&tmp, sizeof(Utilisateur), 1, f) == 1) {
-        if (tmp.id == u->id) tous[n] = *u; else tous[n] = tmp;
-        n++;
-    }
-    fclose(f);
-    FILE *fw = fopen(FICHIER_USERS, "wb");
-    fwrite(tous, sizeof(Utilisateur), n, fw);
-    fclose(fw);
-    free(tous);
-    return 1;
-}
-
-int users_authentifier(const char *login, const char *motDePasseClair, Utilisateur *u) {
-    if (!users_rechercherParLogin(login, u)) {
-        printf("Login inconnu.\n");
-        return 0;
-    }
-    if (u->etat == ETAT_BLOQUE) {
-        printf("Compte bloque. Contactez un administrateur.\n");
-        return 0;
-    }
-    if (!utils_verifierMotDePasse(motDePasseClair, u->motDePasse)) {
-        printf("Mot de passe incorrect.\n");
-        return 0;
-    }
-    utils_dateActuelle(u->dateDerniereConnexion);
-    users_sauvegarder(u);
-    utils_journaliser(login, "Connexion reussie");
-    return 1;
-}
-
-int users_changerMotDePasse(int idUtilisateur, const char *nouveauMdpClair) {
-    Utilisateur u;
-    if (!users_rechercherParId(idUtilisateur, &u)) return 0;
-    utils_crypterMotDePasse(nouveauMdpClair, u.motDePasse);
-    u.doitChangerMdp = 0;
-    users_sauvegarder(&u);
-    utils_journaliser(u.login, "Changement de mot de passe");
+    utils_journaliser("Ajout utilisateur");
     return 1;
 }
 
 int users_bloquer(int id) {
-    Utilisateur u;
-    if (!users_rechercherParId(id, &u)) return 0;
-    u.etat = ETAT_BLOQUE;
-    users_sauvegarder(&u);
-    utils_journaliser(u.login, "Compte bloque par un administrateur");
-    return 1;
+    Utilisateur tab[1000];
+    int nb = charger_utilisateurs(tab);
+    for (int i = 0; i < nb; i++) {
+        if (tab[i].id == id) {
+            tab[i].etat = ETAT_BLOQUE;
+            sauvegarder_utilisateurs(tab, nb);
+            utils_journaliser("Compte bloque");
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int users_debloquer(int id) {
-    Utilisateur u;
-    if (!users_rechercherParId(id, &u)) return 0;
-    u.etat = ETAT_ACTIF;
-    users_sauvegarder(&u);
-    utils_journaliser(u.login, "Compte debloque par un administrateur");
-    return 1;
+    Utilisateur tab[1000];
+    int nb = charger_utilisateurs(tab);
+    for (int i = 0; i < nb; i++) {
+        if (tab[i].id == id) {
+            tab[i].etat = ETAT_ACTIF;
+            sauvegarder_utilisateurs(tab, nb);
+            utils_journaliser("Compte debloque");
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int users_changerMotDePasse(int id, const char *nouveauMdp) {
+    Utilisateur tab[1000];
+    int nb = charger_utilisateurs(tab);
+    for (int i = 0; i < nb; i++) {
+        if (tab[i].id == id) {
+            utils_crypterMotDePasse(nouveauMdp, tab[i].motDePasse);
+            tab[i].doitChangerMdp = 0;
+            sauvegarder_utilisateurs(tab, nb);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int users_rechercherParId(int id, Utilisateur *u) {
+    Utilisateur tab[1000];
+    int nb = charger_utilisateurs(tab);
+    for (int i = 0; i < nb; i++) {
+        if (tab[i].id == id) {
+            *u = tab[i];
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int users_rechercherParLogin(const char *login, Utilisateur *u) {
+    Utilisateur tab[1000];
+    int nb = charger_utilisateurs(tab);
+    for (int i = 0; i < nb; i++) {
+        if (strcmp(tab[i].login, login) == 0) {
+            if (u) *u = tab[i];
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int users_listerTous(Utilisateur *tableau, int tailleMax) {
-    FILE *f = fopen(FICHIER_USERS, "rb");
-    if (!f) return 0;
-    int n = 0;
-    while (n < tailleMax && fread(&tableau[n], sizeof(Utilisateur), 1, f) == 1) {
-        n++;
-    }
-    fclose(f);
-    return n;
+    return charger_utilisateurs(tableau);
 }
 
+void menu_utilisateurs(void) {
+    int choix;
+    do {
+        printf("\n--- GESTION DES UTILISATEURS ---\n");
+        printf("1. Ajouter un utilisateur\n");
+        printf("2. Lister les utilisateurs\n");
+        printf("3. Bloquer un compte\n");
+        printf("4. Debloquer un compte\n");
+        printf("0. Retour\n");
+        choix = utils_saisirEntier("Votre choix : ");
+        switch (choix) {
+            case 1: {
+                char nom[NAME_LEN], prenom[NAME_LEN], tel[PHONE_LEN], adr[ADDR_LEN],
+                     mail[EMAIL_LEN], login[LOGIN_LEN];
+                printf("Nom : "); fgets(nom, NAME_LEN, stdin); nom[strcspn(nom, "\n")] = 0;
+                printf("Prenom : "); fgets(prenom, NAME_LEN, stdin); prenom[strcspn(prenom, "\n")] = 0;
+                printf("Telephone : "); fgets(tel, PHONE_LEN, stdin); tel[strcspn(tel, "\n")] = 0;
+                printf("Adresse : "); fgets(adr, ADDR_LEN, stdin); adr[strcspn(adr, "\n")] = 0;
+                printf("Email : "); fgets(mail, EMAIL_LEN, stdin); mail[strcspn(mail, "\n")] = 0;
+                printf("Login (6 majuscules) : "); fgets(login, LOGIN_LEN, stdin); login[strcspn(login, "\n")] = 0;
+                int roleInt;
+                roleInt = utils_saisirEntier("Role (0=ADMIN, 1=USER) : ");
+                Utilisateur res;
+                if (users_ajouter(nom, prenom, tel, adr, mail, login,
+                                  roleInt == 0 ? ROLE_ADMIN : ROLE_USER, &res))
+                    printf("Utilisateur cree (mot de passe par defaut : Library123).\n");
+                break;
+            }
+            case 2: {
+                Utilisateur tab[1000];
+                int n = users_listerTous(tab, 1000);
+                for (int i = 0; i < n; i++) {
+                    printf("[%d] %s %s (%s) - %s - %s\n",
+                           tab[i].id, tab[i].prenom, tab[i].nom, tab[i].login,
+                           tab[i].role == ROLE_ADMIN ? "ADMIN" : "USER",
+                           tab[i].etat == ETAT_ACTIF ? "ACTIF" : "BLOQUE");
+                }
+                break;
+            }
+            case 3: {
+                int id;
+                id = utils_saisirEntier("ID a bloquer : ");
+                if (users_bloquer(id)) printf("Compte bloque.\n");
+                else printf("Echec.\n");
+                break;
+            }
+            case 4: {
+                int id;
+                id = utils_saisirEntier("ID a debloquer : ");
+                if (users_debloquer(id)) printf("Compte debloque.\n");
+                else printf("Echec.\n");
+                break;
+            }
+        }
+    } while (choix != 0);
+}

@@ -1,69 +1,77 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include "categories.h"
 #include "utils.h"
 
-int categories_ajouter(const char *libelle, const char *description, Categorie *resultat) {
-    Categorie c = {0};
+#define FICHIER_CATEGORIES "DATABASE/CATEGORIES.dat"
+
+static int charger_categories(Categorie tab[]) {
+    FILE *f = fopen(FICHIER_CATEGORIES, "rb");
+    if (!f) return 0;
+    int nb = 0;
+    while (fread(&tab[nb], sizeof(Categorie), 1, f) == 1) nb++;
+    fclose(f);
+    return nb;
+}
+
+static void sauvegarder_categories(Categorie tab[], int nb) {
+    FILE *f = fopen(FICHIER_CATEGORIES, "wb");
+    if (!f) return;
+    for (int i = 0; i < nb; i++) fwrite(&tab[i], sizeof(Categorie), 1, f);
+    fclose(f);
+}
+
+void ajouter_categorie(void) {
+    Categorie c;
     c.id = utils_prochainId(FICHIER_CATEGORIES, sizeof(Categorie));
-    strncpy(c.libelle, libelle, NAME_LEN - 1);
-    strncpy(c.description, description, DESC_LEN - 1);
+    printf("Libelle : ");
+    fgets(c.libelle, NAME_LEN, stdin);
+    c.libelle[strcspn(c.libelle, "\n")] = 0;
+    printf("Description : ");
+    fgets(c.description, DESC_LEN, stdin);
+    c.description[strcspn(c.description, "\n")] = 0;
     utils_dateActuelleCourte(c.dateCreation);
 
     FILE *f = fopen(FICHIER_CATEGORIES, "ab");
-    if (!f) return 0;
-    fwrite(&c, sizeof(Categorie), 1, f);
-    fclose(f);
-
-    utils_journaliser("SYSTEME", "Ajout d'une categorie");
-    if (resultat) *resultat = c;
-    return 1;
+    if (f) {
+        fwrite(&c, sizeof(Categorie), 1, f);
+        fclose(f);
+        printf("Categorie ajoutee (ID %d).\n", c.id);
+        utils_journaliser("Ajout categorie");
+    } else {
+        printf("Erreur d'ouverture du fichier.\n");
+    }
 }
 
-int categories_rechercherParId(int id, Categorie *resultat) {
-    FILE *f = fopen(FICHIER_CATEGORIES, "rb");
-    if (!f) return 0;
-    Categorie c;
-    while (fread(&c, sizeof(Categorie), 1, f) == 1) {
-        if (c.id == id) { *resultat = c; fclose(f); return 1; }
+void lister_categories(void) {
+    Categorie tab[1000];
+    int nb = charger_categories(tab);
+    printf("Liste des categories :\n");
+    for (int i = 0; i < nb; i++) {
+        printf("[%d] %s - %s\n", tab[i].id, tab[i].libelle, tab[i].description);
     }
-    fclose(f);
+}
+
+int categorie_existe(int id) {
+    Categorie tab[1000];
+    int nb = charger_categories(tab);
+    for (int i = 0; i < nb; i++) {
+        if (tab[i].id == id) return 1;
+    }
     return 0;
 }
 
-int categories_existe(int id) {
-    Categorie tmp;
-    return categories_rechercherParId(id, &tmp);
-}
-
-int categories_listerToutes(Categorie *tableau, int tailleMax) {
-    FILE *f = fopen(FICHIER_CATEGORIES, "rb");
-    if (!f) return 0;
-    int n = 0;
-    while (n < tailleMax && fread(&tableau[n], sizeof(Categorie), 1, f) == 1) n++;
-    fclose(f);
-    return n;
-}
-
-int categories_supprimer(int id) {
-    /* NOTE : la vérification "aucun livre associé" doit être faite par le
-       module Livres (books_aucuneCategorieAssociee) AVANT d'appeler ceci. */
-    FILE *f = fopen(FICHIER_CATEGORIES, "rb");
-    if (!f) return 0;
-    Categorie *tous = malloc(sizeof(Categorie) * 10000);
-    Categorie tmp;
-    int n = 0, trouve = 0;
-    while (fread(&tmp, sizeof(Categorie), 1, f) == 1) {
-        if (tmp.id == id) { trouve = 1; continue; }
-        tous[n++] = tmp;
-    }
-    fclose(f);
-    if (trouve) {
-        FILE *fw = fopen(FICHIER_CATEGORIES, "wb");
-        fwrite(tous, sizeof(Categorie), n, fw);
-        fclose(fw);
-    }
-    free(tous);
-    return trouve;
+void menu_categories(void) {
+    int choix;
+    do {
+        printf("\n--- GESTION DES CATEGORIES ---\n");
+        printf("1. Ajouter une categorie\n");
+        printf("2. Lister les categories\n");
+        printf("0. Retour\n");
+        choix = utils_saisirEntier("Votre choix : ");
+        switch (choix) {
+            case 1: ajouter_categorie(); break;
+            case 2: lister_categories(); break;
+        }
+    } while (choix != 0);
 }

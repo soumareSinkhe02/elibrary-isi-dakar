@@ -3,12 +3,9 @@
 
 #include "structures.h"
 
-#define FICHIER_CATEGORIES "DATABASE/CATEGORIES.dat"
+void menu_categories(void);
+void ajouter_categorie(void);
+void lister_categories(void);
+int  categorie_existe(int id);
 
-int categories_ajouter(const char *libelle, const char *description, Categorie *resultat);
-int categories_rechercherParId(int id, Categorie *resultat);
-int categories_existe(int id); /* utilisé par le module Livres pour vérifier la contrainte */
-int categories_listerToutes(Categorie *tableau, int tailleMax);
-int categories_supprimer(int id); /* à utiliser uniquement si aucun livre ne la référence */
-
-#endif /* CATEGORIES_H */
+#endif
